@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>Rastreador de Países Visitados</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3"></script>
+  <style>
+    :root{
+      --bg:#0f172a;
+      --panel:#111827;
+      --text:#e5e7eb;
+      --muted:#94a3b8;
+      --visited:#a7d8ff;
+      --outline:#334155;
+      --accent-border:#6aa8d6;
+    }
+    html,body{
+      height:100%;
+      margin:0;
+      background:linear-gradient(180deg, #0b1226, #0f172a);
+      color:var(--text);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+    }
+    .topbar{
+      position:sticky;
+      top:0;
+      z-index:10;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:14px 18px;
+      background:rgba(2,6,23,0.7);
+      backdrop-filter: blur(6px);
+      border-bottom:1px solid rgba(255,255,255,0.06);
+    }
+    .title{
+      font-size:20px;
+      font-weight:800;
+      color:#ffffff;
+      text-shadow:0 1px 0 rgba(0,0,0,0.4);
+    }
+    .wrap{ max-width:1100px; margin:20px auto 40px auto; padding:0 16px 24px 16px; }
+    .panel{
+      background:linear-gradient(180deg, rgba(17,24,39,0.75), rgba(17,24,39,0.55));
+      border:1px solid rgba(255,255,255,0.06);
+      border-radius:16px;
+      box-shadow:0 10px 20px rgba(2,6,23,0.4), inset 0 1px 0 rgba(255,255,255,0.04);
+      overflow:hidden;
+    }
+    .panel-header{
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      gap:12px;
+      padding:12px 16px;
+      border-bottom:1px solid rgba(255,255,255,0.06);
+      color:var(--muted);
+      font-size:14px;
+    }
+    .legend{ display:flex; align-items:center; gap:12px; font-size:13px; color:var(--muted); }
+    .chip{ display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.06);}
+    .box{ width:14px; height:10px; border:1px solid var(--outline); background:transparent;}
+    .box.visited{ background:var(--visited); border-color:var(--accent-border);}
+    .help{ display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:8px; border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.05); color:#e5e7eb; font-weight:800; cursor:pointer; user-select:none;}
+    .map-wrap{ position:relative; width:100%; aspect-ratio:16/9; min-height:420px; max-height:70vh;}
+    svg{ width:100%; height:100%; display:block;}
+    .country{ fill:#0b1220; stroke:var(--outline); stroke-width:0.6px; transition:fill 180ms ease, stroke 180ms ease; cursor:pointer;}
+    .country:hover{ filter:brightness(1.15); stroke:#64748b;}
+    .country.visited{ fill:var(--visited); stroke:var(--accent-border);}
+    .tooltip{ position:absolute; padding:6px 8px; font-size:12px; background:#0b1220; color:#e5e7eb; border:1px solid rgba(255,255,255,0.12); border-radius:8px; pointer-events:none; opacity:0; transform:translate(-50%,-120%); white-space:nowrap; transition:opacity 120ms ease;}
+    .progress-area{ display:flex; flex-direction:column; align-items:center; gap:8px; padding:20px 16px 0 16px;}
+    .progress-container{ position:relative; width:min(720px,92%); height:18px; background:#1e293b; border-radius:12px; overflow:hidden; border:1px solid rgba(255,255,255,0.08);}
+    .progress-bar{ height:100%; width:0%; background:var(--visited); transition:width 0.35s ease;}
+    .progress-label{ position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); font-size:12px; color:#0b1220; font-weight:700;}
+    .progress-count{ font-size:13px; color:var(--muted); text-align:center; padding-bottom:20px;}
+    .modal-backdrop{ position:fixed; inset:0; background:rgba(2,6,23,0.55); display:none; align-items:center; justify-content:center; z-index:50;}
+    .modal{ width:min(92vw,420px); background:#0f172a; border:1px solid rgba(255,255,255,0.08); border-radius:14px; box-shadow:0 20px 40px rgba(0,0,0,0.6); overflow:hidden; color:#e5e7eb;}
+    .modal .head{ padding:14px 16px; border-bottom:1px solid rgba(255,255,255,0.06); font-weight:700;}
+    .modal .body{ padding:16px; color:#cbd5e1; font-size:14px;}
+    .modal .actions{ display:flex; gap:10px; justify-content:flex-end; padding:12px 16px 16px 16px;}
+    .btn{ padding:10px 14px; border-radius:10px; border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.04); color:#e5e7eb; font-weight:600; cursor:pointer;}
+    .btn.primary{ background:#3b82f6; border-color:#1d4ed8;}
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="title">Rastreador de Países Visitados</div>
+  </div>
+  <div class="wrap">
+    <div class="panel">
+      <div class="panel-header">
+        <div class="legend">
+          <span class="chip"><span class="box visited"></span>Visitado</span>
+          <span class="chip"><span class="box"></span>Não Visitado</span>
+        </div>
+        <button class="help" id="help-btn">?</button>
+      </div>
+      <div class="map-wrap" id="map-wrap">
+        <svg id="worldmap"></svg>
+        <div class="tooltip" id="tooltip">País</div>
+      </div>
+      <div class="progress-area">
+        <div class="progress-container">
+          <div class="progress-bar" id="progress-bar"></div>
+          <div class="progress-label" id="progress-label">0%</div>
+        </div>
+        <div class="progress-count" id="progress-count">0 de 195 países visitados</div>
+      </div>
+    </div>
+  </div>
+  <div class="modal-backdrop" id="modal-backdrop">
+    <div class="modal">
+      <div class="head">Confirmar</div>
+      <div class="body" id="modal-message"></div>
+      <div class="actions">
+        <button class="btn" id="btn-cancel">Cancelar</button>
+        <button class="btn primary" id="btn-confirm">Confirmar</button>
+      </div>
+    </div>
+  </div>
+  <div class="modal-backdrop" id="help-backdrop">
+    <div class="modal">
+      <div class="head">Como funciona:</div>
+      <div class="body">
+        <p>Clique em um país para marcá-lo como visitado. Dê um duplo clique para desmarcar.</p>
+        <p>A barra de progresso atualiza em tempo real e é salva no seu dispositivo.</p>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="help-done">Concluir</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    const TOTAL_COUNTRIES = 195;
+    const STORAGE_KEY = "visitedCountries";
+    // Apenas Estados Unidos (840) e Brasil (76) predefinidos como visitados
+    const defaultVisited = [840, 76];
+    let visitedSet;
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if(saved){ visitedSet = new Set(JSON.parse(saved)); }
+    else{ visitedSet = new Set(defaultVisited); }
+
+    const svg = d3.select("#worldmap");
+    const wrap = document.getElementById("map-wrap");
+    const tooltip = document.getElementById("tooltip");
+    const progressBar = document.getElementById("progress-bar");
+    const progressLabel = document.getElementById("progress-label");
+    const progressCount = document.getElementById("progress-count");
+    const modal = document.getElementById("modal-backdrop");
+    const modalMsg = document.getElementById("modal-message");
+    const btnCancel = document.getElementById("btn-cancel");
+    const btnConfirm = document.getElementById("btn-confirm");
+    const helpBackdrop = document.getElementById("help-backdrop");
+    const helpBtn = document.getElementById("help-btn");
+    const helpDone = document.getElementById("help-done");
+    let pendingAction = null;
+
+    const countryNamesPT = {
+      "United States":"Estados Unidos",
+      "Brazil":"Brasil",
+      "Canada":"Canadá",
+      "Nigeria":"Nigéria",
+      "Uganda":"Uganda",
+      "Kenya":"Quênia",
+      "United Kingdom":"Reino Unido",
+      "Mexico":"México",
+      "Germany":"Alemanha",
+      "France":"França",
+      "Spain":"Espanha",
+      "Italy":"Itália",
+      "Portugal":"Portugal",
+      "China":"China",
+      "Japan":"Japão",
+      "India":"Índia",
+      "Australia":"Austrália",
+      "Argentina":"Argentina",
+      "Chile":"Chile",
+      "South Africa":"África do Sul"
+    };
+
+    function updateProgress(){
+      const count = visitedSet.size;
+      const percent = ((count / TOTAL_COUNTRIES) * 100).toFixed(1);
+      progressBar.style.width = percent + "%";
+      progressLabel.textContent = percent + "%";
+      progressCount.textContent = `${count} de ${TOTAL_COUNTRIES} países visitados`;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify([...visitedSet]));
+    }
+    function openConfirm(type){
+      if(type === "mark"){ modalMsg.textContent = "Você gostaria de marcar este país como visitado?"; btnConfirm.textContent = "Marcar"; }
+      else{ modalMsg.textContent = "Você gostaria de desmarcar este país como visitado?"; btnConfirm.textContent = "Desmarcar"; }
+      modal.style.display = "flex";
+    }
+    function closeConfirm(){ modal.style.display="none"; pendingAction=null; }
+    btnCancel.addEventListener("click", closeConfirm);
+    modal.addEventListener("click", e => { if(e.target===modal) closeConfirm(); });
+    helpBtn.addEventListener("click", ()=> helpBackdrop.style.display="flex");
+    helpDone.addEventListener("click", ()=> helpBackdrop.style.display="none");
+    helpBackdrop.addEventListener("click", e=>{ if(e.target===helpBackdrop) helpBackdrop.style.display="none"; });
+
+    const width = wrap.clientWidth, height = wrap.clientHeight;
+    svg.attr("viewBox", `0 0 ${width} ${height}`);
+    const projection = d3.geoNaturalEarth1().scale(Math.min(width, height)*0.28).translate([width/2, height/2+10]);
+    const path = d3.geoPath(projection);
+
+    d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json").then(topology=>{
+      const countries = topojson.feature(topology, topology.objects.countries).features;
+      svg.append("g").selectAll("path").data(countries).join("path")
+        .attr("class", d=>"country"+(visitedSet.has(+d.id)?" visited":""))
+        .attr("d", path)
+        .on("mousemove", (event,d)=>{
+          const [x,y]=d3.pointer(event);
+          let name = d.properties.name || "País";
+          if(countryNamesPT[name]) name = countryNamesPT[name];
+          tooltip.textContent=name;
+          tooltip.style.left=x+"px"; tooltip.style.top=y+"px"; tooltip.style.opacity=1;
+        })
+        .on("mouseleave", ()=> tooltip.style.opacity=0)
+        .on("click", function(event,d){
+          const el=d3.select(this);
+          if(!el.classed("visited")){ pendingAction={type:"mark",element:el,feature:d}; openConfirm("mark"); }
+        })
+        .on("dblclick", function(event,d){
+          const el=d3.select(this);
+          if(el.classed("visited")){ pendingAction={type:"unmark",element:el,feature:d}; openConfirm("unmark"); }
+        });
+
+      svg.insert("path",":first-child").datum({type:"Sphere"})
+         .attr("d", d3.geoPath(projection))
+         .attr("fill","none")
+         .attr("stroke","rgba(148,163,184,0.3)")
+         .attr("stroke-width",0.8);
+
+      btnConfirm.addEventListener("click", ()=>{
+        if(!pendingAction)return;
+        const {type,element,feature}=pendingAction;
+        if(type==="mark"){ element.classed("visited",true); visitedSet.add(+feature.id); }
+        else{ element.classed("visited",false); visitedSet.delete(+feature.id); }
+        updateProgress(); closeConfirm();
+      });
+      updateProgress();
+    });
+  </script>
+</body>
+</html>
